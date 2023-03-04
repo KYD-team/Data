@@ -27,7 +27,7 @@ async function getProjectLinks(pageUrl) {
 async function scrapeProjects(searchUrl) {
   const allProjects = [];
 
-  for (let i = 1; i <= 1246; i++) {
+  for (let i = 1; i <= 50; i++) {
     const searchUrl = `https://devpost.com/software/search?page=${i}&query=is%3Awinner`;
     console.log(`Scraping page ${i}...`);
 
@@ -43,77 +43,99 @@ async function scrapeProjects(searchUrl) {
   }
     
   const jsonData = {
-    projects,
-    total: projects.length,
+    projects: allProjects,
+    total: allProjects.length,
   };
   
   const devpostMap = {
     projects: {},
     users: {},
   }
-  projects.forEach((project) => {
+  allProjects.forEach((project) => {
     const {githubUrl, participants, fullName} = project;
 
     if (githubUrl) {
       devpostMap.projects[fullName] = githubUrl;
     }
 
-    if (participants && participants?.github) {
-      devpostMap.users[participants.name] = githubUrl;
+    if (participants) {
+      participants.forEach((participant) => {
+        if (participant.github) {
+          devpostMap.users[participant.github] = participant.github;
+        }
+      })
     }
   })
 
+  console.log(devpostMap)
   saveData(jsonData, 'devpostProjects.json');
   saveData(devpostMap, 'devpostMap.json');
   return jsonData;
 }
 
 async function getProjectData(link) {
-  console.log("link")
-  console.log(link)
   const url = link;
-  console.log(`Getting data for project ${url}...`);
-  const { data } = await axios.get(url);
-  const $ = cheerio.load(data);
+  console.log(`Getting data for project ${url}`);
+  let data = null;
+  let projectData = {};
+
+  try {
+    const result = await axios.get(url);
+    data = result.data;
+  } catch (error) {
+  }
   
-  const githubUrl = $('a[href*="github.com"]').attr('href');
-  const pathParts = url.replace("https://github.com/", "").split("/");
-  const repoName = pathParts.slice(0, 2).join("/");
+  if (data) { 
+    const $ = cheerio.load(data);
+    
+    const githubUrl = $('a[href*="github.com"]').attr('href');
+    const pathParts = githubUrl?.replace("https://github.com/", "").split("/");
+    const repoName = pathParts?.slice(0, 2).join("/");
 
-  const projectData = {
-    githubUrl,
-    fullName: repoName,
-    participants: [],
-  };
+    projectData = {
+      githubUrl,
+      fullName: repoName,
+      participants: [],
+    };
 
-  $('.software-team-member')?.each((i, elem) => {
-    const profileLink = $(elem).find('a').attr('href');
-    const imageUrl = $(elem).find('img').attr('src');
-    projectData.participants.push({ profileLink, imageUrl });
-  });
+    $('.software-team-member')?.each((i, elem) => {
+      const profileLink = $(elem).find('a').attr('href');
+      const imageUrl = $(elem).find('img').attr('src');
+      projectData.participants.push({ profileLink, imageUrl });
+    });
 
-  const usersData = await Promise.all(
-    projectData.participants?.map(async (user) => {
-      const copyUser = {...user}
+    const usersData = await Promise.all(
+      projectData.participants?.map(async (user) => {
+        const copyUser = {...user}
 
-      if (copyUser.profileLink) {
-        const { data } = await axios.get(copyUser.profileLink);
-        const $ = cheerio.load(data);
-        const githubUrlUser = $('a[href*="github.com"]').attr('href');
+        if (copyUser.profileLink) {
+          let data = null;
+          try {
+            const result = await axios.get(copyUser.profileLink);
+            data = result.data;
+          } catch (error) {
+          }
 
-        if (githubUrlUser?.length) {
-          const githubUsername = githubUrlUser.split('/').pop();
-          const name = $('#portfolio-user-name').text().trim();
-          copyUser['github'] = githubUsername;
-          copyUser['name'] = name;
+          if (data) {
+            const $ = cheerio.load(data);
+            const githubUrlUser = $('a[href*="github.com"]').attr('href');
+  
+            if (githubUrlUser?.length) {
+              const githubUsername = githubUrlUser.split('/').pop();
+              const name = $('#portfolio-user-name').text().trim();
+              copyUser['github'] = githubUsername;
+              copyUser['name'] = name;
+            }
+          }
         }
-      }
 
-      return copyUser;
-    })
-  );
+        return copyUser;
+      })
+    );
 
-  projectData.participants = usersData
+    projectData.participants = usersData  
+  }
+  
   return projectData;
 }
 
